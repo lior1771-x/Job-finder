@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# Local data
+jobs.db
+
+# Config with secrets (webhooks, etc.)
+config.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Claude Code
+.claude/
+
+# Environment
+.env
+.env.local

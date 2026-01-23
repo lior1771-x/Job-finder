@@ -1,0 +1,31 @@
+# Job Finder Configuration
+
+# Webhook URLs for notifications (optional)
+webhooks:
+  slack: null  # https://hooks.slack.com/services/...
+  discord: null  # https://discord.com/api/webhooks/...
+
+# Job filters - jobs must match at least one keyword (case-insensitive)
+filters:
+  keywords:
+    - engineer
+    - developer
+    - software
+  locations:  # Optional location filter (empty = all locations)
+    - remote
+    - new york
+
+# Scheduler settings
+schedule:
+  interval_hours: 6
+
+# Database path
+db_path: jobs.db
+
+# Companies to monitor
+companies:
+  - google
+  - stripe
+  - paypal
+  - uber
+  - ramp
