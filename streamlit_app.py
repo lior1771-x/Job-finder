@@ -10,7 +10,7 @@ from job_finder.config import Config
 
 # Page config
 st.set_page_config(
-    page_title="Job Finder",
+    page_title="PM Job Finder",
     page_icon="💼",
     layout="wide",
 )
@@ -25,7 +25,7 @@ storage = get_storage()
 
 
 def main():
-    st.title("Job Finder")
+    st.title("PM Job Finder")
 
     # Sidebar navigation
     page = st.sidebar.radio(
@@ -46,44 +46,70 @@ def main():
 def show_dashboard():
     st.header("Dashboard")
 
-    stats = storage.get_stats()
+    # Get all jobs and filter for PM roles
+    all_jobs = storage.get_all_jobs()
+    pm_jobs = [j for j in all_jobs if is_product_management_role(j.title)]
 
     # Top-level metrics
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.metric("Total Jobs", stats["total"])
+        st.metric("PM Jobs", len(pm_jobs))
 
     with col2:
-        st.metric("Companies Tracked", len(stats["by_company"]))
+        companies_with_pm = len(set(j.company for j in pm_jobs))
+        st.metric("Companies with PM Roles", companies_with_pm)
 
     with col3:
-        # Jobs added in last 24 hours
-        all_jobs = storage.get_all_jobs()
+        # PM jobs added in last 24 hours
         recent = sum(
-            1 for job in all_jobs
+            1 for job in pm_jobs
             if job.first_seen > datetime.now() - timedelta(days=1)
         )
         st.metric("New (24h)", recent)
 
     st.divider()
 
-    # Jobs by company chart
-    st.subheader("Jobs by Company")
+    # PM jobs by company chart
+    st.subheader("PM Jobs by Company")
 
-    if stats["by_company"]:
+    if pm_jobs:
+        from collections import Counter
+        company_counts = Counter(j.company.title() for j in pm_jobs)
         df = pd.DataFrame(
-            list(stats["by_company"].items()),
+            list(company_counts.items()),
             columns=["Company", "Jobs"]
         )
         df = df.sort_values("Jobs", ascending=True)
         st.bar_chart(df.set_index("Company"))
     else:
-        st.info("No jobs in database yet. Run the scraper to fetch jobs.")
+        st.info("No PM jobs in database yet. Run the scraper to fetch jobs.")
+
+
+def is_product_management_role(title: str) -> bool:
+    """Check if job title is a product management role."""
+    title_lower = title.lower()
+    pm_keywords = [
+        "product manager",
+        "product management",
+        "product lead",
+        "product owner",
+        "product director",
+        "head of product",
+        "vp product",
+        "chief product",
+        "group product manager",
+        "senior product manager",
+        "associate product manager",
+        "technical product manager",
+        "staff product manager",
+        "principal product manager",
+    ]
+    return any(kw in title_lower for kw in pm_keywords)
 
 
 def show_job_listings():
-    st.header("Job Listings")
+    st.header("Product Management Jobs")
 
     # Filters
     col1, col2, col3 = st.columns(3)
@@ -93,7 +119,13 @@ def show_job_listings():
         selected_company = st.selectbox("Company", companies)
 
     with col2:
-        keyword = st.text_input("Search keyword", placeholder="e.g. engineer")
+        days_filter = st.number_input(
+            "Posted within (days)",
+            min_value=1,
+            max_value=365,
+            value=7,
+            help="Show jobs first seen within this many days"
+        )
 
     with col3:
         location_filter = st.text_input("Location", placeholder="e.g. remote")
@@ -104,14 +136,18 @@ def show_job_listings():
     else:
         jobs = storage.get_all_jobs(company=selected_company)
 
-    # Apply filters
-    if keyword:
-        jobs = [j for j in jobs if keyword.lower() in j.title.lower()]
+    # Filter for product management roles only
+    jobs = [j for j in jobs if is_product_management_role(j.title)]
 
+    # Filter by days
+    cutoff_date = datetime.now() - timedelta(days=days_filter)
+    jobs = [j for j in jobs if j.first_seen > cutoff_date]
+
+    # Apply location filter
     if location_filter:
         jobs = [j for j in jobs if location_filter.lower() in j.location.lower()]
 
-    st.write(f"Showing {len(jobs)} jobs")
+    st.write(f"Showing {len(jobs)} product management jobs from the last {days_filter} days")
 
     if jobs:
         # Convert to dataframe for display
@@ -170,9 +206,10 @@ def show_scraper():
                 scraper = SCRAPERS[company]()
                 jobs = scraper.fetch_jobs()
 
-                # Apply filters from config
-                if config.filters.keywords:
-                    jobs = [j for j in jobs if j.matches_keywords(config.filters.keywords)]
+                # Filter for product management roles only
+                jobs = [j for j in jobs if is_product_management_role(j.title)]
+
+                # Apply location filters from config
                 if config.filters.locations:
                     jobs = [j for j in jobs if j.matches_locations(config.filters.locations)]
 
