@@ -116,8 +116,11 @@ def show_job_listings():
     # Filters
     col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
 
+    # Map display names to scraper keys
+    company_display_names = {cls.company_name: key for key, cls in SCRAPERS.items()}
+
     with col1:
-        companies = ["All"] + list(SCRAPERS.keys())
+        companies = ["All"] + list(company_display_names.keys())
         selected_company = st.selectbox("Company", companies)
 
     with col2:

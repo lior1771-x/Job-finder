@@ -190,7 +190,7 @@ class JobStorage:
         with sqlite3.connect(self.db_path) as conn:
             if company:
                 cursor = conn.execute(
-                    "SELECT * FROM jobs WHERE company = ? ORDER BY first_seen DESC",
+                    "SELECT * FROM jobs WHERE company = ? COLLATE NOCASE ORDER BY first_seen DESC",
                     (company,),
                 )
             else:
