@@ -189,7 +189,7 @@ def show_job_listings():
 
             with col2:
                 if is_tracked:
-                    st.success("Tracked", icon="✓")
+                    st.success("Tracked")
                 else:
                     if st.button("Track", key=f"track_{job.company}_{job.id}", type="primary"):
                         storage.add_tracker_entry(
