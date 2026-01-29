@@ -9,7 +9,6 @@ from .ramp import RampScraper
 from .openai import OpenAIScraper
 from .anthropic import AnthropicScraper
 from .datadog import DatadogScraper
-from .meta import MetaScraper
 from .salesforce import SalesforceScraper
 from .amazon import AmazonScraper
 
@@ -23,7 +22,6 @@ __all__ = [
     "OpenAIScraper",
     "AnthropicScraper",
     "DatadogScraper",
-    "MetaScraper",
     "SalesforceScraper",
     "AmazonScraper",
 ]
@@ -37,7 +35,6 @@ SCRAPERS = {
     "openai": OpenAIScraper,
     "anthropic": AnthropicScraper,
     "datadog": DatadogScraper,
-    "meta": MetaScraper,
     "salesforce": SalesforceScraper,
     "amazon": AmazonScraper,
 }

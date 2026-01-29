@@ -68,7 +68,7 @@ class GoogleScraper(BaseScraper):
             title_slug = match.group(2)
 
             # Convert slug to readable title
-            title = title_slug.replace("-", " ").title()
+            title = self._slug_to_title(title_slug)
 
             # Parse lastmod date
             posted_date = None
@@ -92,3 +92,48 @@ class GoogleScraper(BaseScraper):
         except (KeyError, TypeError) as e:
             logger.warning(f"Error parsing Google sitemap entry: {e}")
             return None
+
+    @staticmethod
+    def _slug_to_title(slug: str) -> str:
+        """Convert URL slug to a properly cased title."""
+        # Known acronyms/abbreviations that should stay uppercase
+        uppercase_words = {
+            "ai", "ml", "api", "apis", "ar", "vr", "xr", "ui", "ux",
+            "sre", "swe", "tpm", "pm", "hr", "it", "ab", "qa",
+            "gcp", "gtm", "sql", "css", "html", "ios", "tv", "hq",
+            "crm", "erp", "saas", "b2b", "b2c", "emea", "apac",
+            "npi", "ops", "devops", "devsecops",
+        }
+        # Known words that should keep specific casing
+        special_words = {
+            "youtube": "YouTube",
+            "google": "Google",
+            "android": "Android",
+            "chrome": "Chrome",
+            "pixel": "Pixel",
+            "waymo": "Waymo",
+            "deepmind": "DeepMind",
+            "tensorflow": "TensorFlow",
+            "firebase": "Firebase",
+            "fitbit": "Fitbit",
+            "waze": "Waze",
+        }
+
+        words = slug.split("-")
+        result = []
+        for word in words:
+            word_lower = word.lower()
+            if word_lower in uppercase_words:
+                result.append(word.upper())
+            elif word_lower in special_words:
+                result.append(special_words[word_lower])
+            else:
+                result.append(word.capitalize())
+
+        # Fix roman numerals (I, II, III, IV)
+        title = " ".join(result)
+        title = re.sub(r'\bIii\b', 'III', title)
+        title = re.sub(r'\bIi\b', 'II', title)
+        title = re.sub(r'\bIv\b', 'IV', title)
+
+        return title

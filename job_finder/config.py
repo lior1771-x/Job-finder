@@ -42,7 +42,7 @@ class Config:
     companies: List[str] = field(
         default_factory=lambda: [
             "google", "stripe", "paypal", "uber", "ramp",
-            "openai", "anthropic", "datadog", "meta", "salesforce", "amazon",
+            "openai", "anthropic", "datadog", "salesforce", "amazon",
         ]
     )
 
@@ -91,7 +91,7 @@ class Config:
         db_path = data.get("db_path", "jobs.db")
         companies = data.get("companies", [
             "google", "stripe", "paypal", "uber", "ramp",
-            "openai", "anthropic", "datadog", "meta", "salesforce", "amazon",
+            "openai", "anthropic", "datadog", "salesforce", "amazon",
         ])
 
         return cls(
