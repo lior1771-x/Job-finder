@@ -30,7 +30,7 @@ def main():
     # Sidebar navigation
     page = st.sidebar.radio(
         "Navigation",
-        ["Dashboard", "Job Listings", "My Tracker", "Run Scraper", "Settings"]
+        ["Dashboard", "Job Listings", "My Tracker", "Settings"]
     )
 
     if page == "Dashboard":
@@ -39,8 +39,6 @@ def main():
         show_job_listings()
     elif page == "My Tracker":
         show_tracker()
-    elif page == "Run Scraper":
-        show_scraper()
     elif page == "Settings":
         show_settings()
 
@@ -113,11 +111,70 @@ def is_product_management_role(title: str) -> bool:
 def show_job_listings():
     st.header("Product Management Jobs")
 
-    # Filters
-    col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
-
     # Map display names to scraper keys
     company_display_names = {cls.company_name: key for key, cls in SCRAPERS.items()}
+
+    # Scraper section
+    config = Config.load()
+    with st.expander("Scrape New Jobs"):
+        scraper_col1, scraper_col2 = st.columns([4, 1])
+
+        with scraper_col1:
+            selected_scrapers = st.multiselect(
+                "Companies to scrape",
+                options=list(company_display_names.keys()),
+                default=[
+                    name for name, key in company_display_names.items()
+                    if key in config.companies
+                ],
+            )
+
+        with scraper_col2:
+            st.write("")  # spacing
+            run_scraper = st.button("Scrape", type="primary", use_container_width=True)
+
+        if run_scraper:
+            if not selected_scrapers:
+                st.warning("Please select at least one company.")
+            else:
+                progress = st.progress(0)
+                status_text = st.empty()
+                results = []
+
+                for i, name in enumerate(selected_scrapers):
+                    key = company_display_names[name]
+                    status_text.text(f"Scraping {name}...")
+
+                    try:
+                        scraper = SCRAPERS[key]()
+                        jobs = scraper.fetch_jobs()
+
+                        jobs = [j for j in jobs if is_product_management_role(j.title)]
+
+                        if config.filters.locations:
+                            jobs = [j for j in jobs if j.matches_locations(config.filters.locations)]
+
+                        new_jobs = storage.find_new_jobs(jobs)
+                        if new_jobs:
+                            storage.add_jobs(new_jobs)
+
+                        results.append({"Company": name, "PM Jobs": len(jobs), "New": len(new_jobs), "Status": "OK"})
+                    except Exception as e:
+                        results.append({"Company": name, "PM Jobs": 0, "New": 0, "Status": f"Error: {e}"})
+
+                    progress.progress((i + 1) / len(selected_scrapers))
+
+                status_text.text("Done!")
+                total_new = sum(r["New"] for r in results)
+                if total_new > 0:
+                    st.success(f"Found {total_new} new job(s)!")
+                else:
+                    st.info("No new jobs found.")
+                st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
+
+    st.divider()
+
+    # Filters
 
     with col1:
         companies = ["All"] + list(company_display_names.keys())
@@ -391,79 +448,6 @@ def show_tracker():
                         st.rerun()
 
             st.divider()
-
-
-def show_scraper():
-    st.header("Run Scraper")
-
-    config = Config.load()
-    configured_companies = config.companies
-
-    st.write("Select companies to scrape:")
-
-    selected = st.multiselect(
-        "Companies",
-        options=list(SCRAPERS.keys()),
-        default=configured_companies,
-    )
-
-    if st.button("Run Scraper", type="primary"):
-        if not selected:
-            st.warning("Please select at least one company.")
-            return
-
-        progress = st.progress(0)
-        status = st.empty()
-        results = []
-
-        for i, company in enumerate(selected):
-            status.text(f"Scraping {company}...")
-
-            try:
-                scraper = SCRAPERS[company]()
-                jobs = scraper.fetch_jobs()
-
-                # Filter for product management roles only
-                jobs = [j for j in jobs if is_product_management_role(j.title)]
-
-                # Apply location filters from config
-                if config.filters.locations:
-                    jobs = [j for j in jobs if j.matches_locations(config.filters.locations)]
-
-                # Find and store new jobs
-                new_jobs = storage.find_new_jobs(jobs)
-                if new_jobs:
-                    storage.add_jobs(new_jobs)
-
-                results.append({
-                    "company": company,
-                    "total": len(jobs),
-                    "new": len(new_jobs),
-                    "status": "success"
-                })
-            except Exception as e:
-                results.append({
-                    "company": company,
-                    "total": 0,
-                    "new": 0,
-                    "status": f"error: {str(e)}"
-                })
-
-            progress.progress((i + 1) / len(selected))
-
-        status.text("Done!")
-
-        # Show results
-        st.subheader("Results")
-
-        total_new = sum(r["new"] for r in results)
-        if total_new > 0:
-            st.success(f"Found {total_new} new job(s)!")
-        else:
-            st.info("No new jobs found.")
-
-        results_df = pd.DataFrame(results)
-        st.dataframe(results_df, hide_index=True, use_container_width=True)
 
 
 def show_settings():
