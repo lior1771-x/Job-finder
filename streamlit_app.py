@@ -146,6 +146,9 @@ def show_job_listings():
             st.write("")  # spacing
             run_scraper = st.button("Scrape", type="primary", use_container_width=True)
 
+        clear_rescrape = st.checkbox("Clear existing data before scraping", value=False,
+                                      help="Deletes stored jobs for selected companies, then re-scrapes fresh")
+
         if run_scraper:
             if not selected_scrapers:
                 st.warning("Please select at least one company.")
@@ -159,6 +162,11 @@ def show_job_listings():
                     status_text.text(f"Scraping {name}...")
 
                     try:
+                        if clear_rescrape:
+                            deleted = storage.delete_jobs_by_company(name)
+                            if deleted:
+                                status_text.text(f"Cleared {deleted} old {name} jobs, re-scraping...")
+
                         scraper = SCRAPERS[key]()
                         jobs = scraper.fetch_jobs()
 

@@ -212,6 +212,15 @@ class JobStorage:
                 for row in cursor.fetchall()
             ]
 
+    def delete_jobs_by_company(self, company: str) -> int:
+        """Delete all jobs for a given company. Returns number of deleted rows."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM jobs WHERE company = ? COLLATE NOCASE", (company,)
+            )
+            conn.commit()
+            return cursor.rowcount
+
     def get_stats(self) -> dict:
         """Get statistics about stored jobs."""
         with sqlite3.connect(self.db_path) as conn:
