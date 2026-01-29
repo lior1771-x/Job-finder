@@ -170,7 +170,14 @@ def show_job_listings():
             with col1:
                 # Job info
                 st.markdown(f"**{job.title}**")
-                st.caption(f"{job.company.title()} · {job.location} · {job.first_seen.strftime('%Y-%m-%d')}")
+                # Show posted_date if available, otherwise first_seen
+                if job.posted_date:
+                    date_str = job.posted_date.strftime('%Y-%m-%d')
+                    date_label = "Posted"
+                else:
+                    date_str = job.first_seen.strftime('%Y-%m-%d')
+                    date_label = "Found"
+                st.caption(f"{job.company.title()} · {job.location} · {date_label}: {date_str}")
                 if job.department:
                     st.caption(f"Dept: {job.department}")
 
