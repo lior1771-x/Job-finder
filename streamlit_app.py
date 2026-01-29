@@ -15,12 +15,8 @@ st.set_page_config(
     layout="wide",
 )
 
-# Initialize storage
-# Version bump to invalidate cache when storage methods change
-STORAGE_VERSION = 3
-
-@st.cache_resource
-def get_storage(_version=STORAGE_VERSION):
+# Initialize storage - no caching to ensure latest methods are available
+def get_storage():
     config = Config.load()
     return JobStorage(config.db_path)
 
