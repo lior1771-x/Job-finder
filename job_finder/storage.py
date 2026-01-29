@@ -371,3 +371,18 @@ class JobStorage:
                 ]
                 return dict(zip(columns, row))
             return None
+
+    def is_job_tracked(self, job_id: str, job_company: str) -> bool:
+        """Check if a job is already in the tracker."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT 1 FROM tracker WHERE job_id = ? AND job_company = ? LIMIT 1",
+                (job_id, job_company),
+            )
+            return cursor.fetchone() is not None
+
+    def get_tracked_job_ids(self) -> Set[tuple]:
+        """Get all tracked job (id, company) pairs for quick lookup."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT job_id, job_company FROM tracker WHERE job_id IS NOT NULL")
+            return {(row[0], row[1]) for row in cursor.fetchall()}

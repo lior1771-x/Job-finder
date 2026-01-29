@@ -17,7 +17,7 @@ st.set_page_config(
 
 # Initialize storage
 # Version bump to invalidate cache when storage methods change
-STORAGE_VERSION = 2
+STORAGE_VERSION = 3
 
 @st.cache_resource
 def get_storage(_version=STORAGE_VERSION):
@@ -117,7 +117,7 @@ def show_job_listings():
     st.header("Product Management Jobs")
 
     # Filters
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
 
     with col1:
         companies = ["All"] + list(SCRAPERS.keys())
@@ -134,6 +134,9 @@ def show_job_listings():
 
     with col3:
         location_filter = st.text_input("Location", placeholder="e.g. remote")
+
+    with col4:
+        hide_tracked = st.checkbox("Hide tracked", value=False, help="Hide jobs already in tracker")
 
     # Fetch jobs
     if selected_company == "All":
@@ -152,31 +155,46 @@ def show_job_listings():
     if location_filter:
         jobs = [j for j in jobs if location_filter.lower() in j.location.lower()]
 
+    # Get tracked jobs for marking
+    tracked_jobs = storage.get_tracked_job_ids()
+
+    # Optionally hide already tracked jobs
+    if hide_tracked:
+        jobs = [j for j in jobs if (j.id, j.company) not in tracked_jobs]
+
     st.write(f"Showing {len(jobs)} product management jobs from the last {days_filter} days")
 
     if jobs:
-        # Convert to dataframe for display
-        df = pd.DataFrame([
-            {
-                "Company": job.company.title(),
-                "Title": job.title,
-                "Location": job.location,
-                "Department": job.department or "-",
-                "First Seen": job.first_seen.strftime("%Y-%m-%d %H:%M"),
-                "URL": job.url,
-            }
-            for job in jobs
-        ])
+        # Display jobs with track button
+        for job in jobs:
+            is_tracked = (job.id, job.company) in tracked_jobs
 
-        # Display as a table with clickable links
-        st.dataframe(
-            df,
-            column_config={
-                "URL": st.column_config.LinkColumn("Apply Link"),
-            },
-            hide_index=True,
-            use_container_width=True,
-        )
+            col1, col2 = st.columns([5, 1])
+
+            with col1:
+                # Job info
+                st.markdown(f"**{job.title}**")
+                st.caption(f"{job.company.title()} · {job.location} · {job.first_seen.strftime('%Y-%m-%d')}")
+                if job.department:
+                    st.caption(f"Dept: {job.department}")
+
+            with col2:
+                if is_tracked:
+                    st.success("Tracked", icon="✓")
+                else:
+                    if st.button("Track", key=f"track_{job.company}_{job.id}", type="primary"):
+                        storage.add_tracker_entry(
+                            company=job.company.title(),
+                            role=job.title,
+                            status="Interested",
+                            job_id=job.id,
+                            job_company=job.company,
+                        )
+                        st.rerun()
+
+            # Apply link
+            st.markdown(f"[Apply →]({job.url})")
+            st.divider()
     else:
         st.info("No jobs found matching your filters.")
 
