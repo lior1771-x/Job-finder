@@ -16,8 +16,11 @@ st.set_page_config(
 )
 
 # Initialize storage
+# Version bump to invalidate cache when storage methods change
+STORAGE_VERSION = 2
+
 @st.cache_resource
-def get_storage():
+def get_storage(_version=STORAGE_VERSION):
     config = Config.load()
     return JobStorage(config.db_path)
 
