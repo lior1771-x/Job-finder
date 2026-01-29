@@ -1,4 +1,4 @@
-"""Ramp job scraper using Ashby API."""
+"""OpenAI job scraper using Greenhouse API."""
 
 import logging
 from datetime import datetime
@@ -12,19 +12,19 @@ from .base import BaseScraper
 logger = logging.getLogger(__name__)
 
 
-class RampScraper(BaseScraper):
-    """Scraper for Ramp jobs via Ashby API."""
+class OpenAIScraper(BaseScraper):
+    """Scraper for OpenAI jobs via Greenhouse API."""
 
-    company_name = "Ramp"
-    # Ashby public API endpoint for Ramp
-    API_URL = "https://api.ashbyhq.com/posting-api/job-board/ramp"
+    company_name = "OpenAI"
+    API_URL = "https://api.greenhouse.io/v1/boards/openai/jobs"
 
     def fetch_jobs(self) -> List[Job]:
-        """Fetch jobs from Ramp's Ashby board."""
+        """Fetch jobs from OpenAI's Greenhouse board."""
         jobs = []
         try:
             response = requests.get(
                 self.API_URL,
+                params={"content": "true"},
                 timeout=30,
                 headers={"User-Agent": "JobFinder/1.0"},
             )
@@ -36,45 +36,46 @@ class RampScraper(BaseScraper):
                 if job:
                     jobs.append(job)
 
-            logger.info(f"Fetched {len(jobs)} jobs from Ramp")
+            logger.info(f"Fetched {len(jobs)} jobs from OpenAI")
 
         except requests.RequestException as e:
-            logger.error(f"Error fetching Ramp jobs: {e}")
+            logger.error(f"Error fetching OpenAI jobs: {e}")
 
         return jobs
 
     def _parse_job(self, data: dict) -> Job | None:
-        """Parse a job from Ashby API response."""
+        """Parse a job from Greenhouse API response."""
         try:
-            # Get location
-            location = data.get("location", "Unknown")
-            if data.get("isRemote"):
-                location = f"{location} (Remote)" if location != "Unknown" else "Remote"
+            locations = []
+            for office in data.get("offices", []):
+                if office.get("name"):
+                    locations.append(office["name"])
+            location = ", ".join(locations) if locations else "Unknown"
 
-            # Get department/team
-            department = data.get("department", "")
-            if data.get("team"):
-                department = f"{department} - {data['team']}" if department else data["team"]
+            departments = []
+            for dept in data.get("departments", []):
+                if dept.get("name"):
+                    departments.append(dept["name"])
+            department = ", ".join(departments) if departments else ""
 
-            # Parse posted date
             posted_date = None
-            if data.get("publishedAt"):
+            if data.get("updated_at"):
                 try:
                     posted_date = datetime.fromisoformat(
-                        data["publishedAt"].replace("Z", "+00:00")
+                        data["updated_at"].replace("Z", "+00:00")
                     )
                 except ValueError:
                     pass
 
             return Job(
-                id=data["id"],
+                id=str(data["id"]),
                 company=self.company_name,
                 title=data.get("title", "Unknown"),
                 location=location,
-                url=data.get("jobUrl", ""),
+                url=data.get("absolute_url", ""),
                 department=department,
                 posted_date=posted_date,
             )
         except (KeyError, TypeError) as e:
-            logger.warning(f"Error parsing Ramp job: {e}")
+            logger.warning(f"Error parsing OpenAI job: {e}")
             return None

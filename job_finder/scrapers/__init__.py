@@ -6,6 +6,12 @@ from .stripe import StripeScraper
 from .paypal import PayPalScraper
 from .uber import UberScraper
 from .ramp import RampScraper
+from .openai import OpenAIScraper
+from .anthropic import AnthropicScraper
+from .datadog import DatadogScraper
+from .meta import MetaScraper
+from .salesforce import SalesforceScraper
+from .amazon import AmazonScraper
 
 __all__ = [
     "BaseScraper",
@@ -14,6 +20,12 @@ __all__ = [
     "PayPalScraper",
     "UberScraper",
     "RampScraper",
+    "OpenAIScraper",
+    "AnthropicScraper",
+    "DatadogScraper",
+    "MetaScraper",
+    "SalesforceScraper",
+    "AmazonScraper",
 ]
 
 SCRAPERS = {
@@ -22,4 +34,10 @@ SCRAPERS = {
     "paypal": PayPalScraper,
     "uber": UberScraper,
     "ramp": RampScraper,
+    "openai": OpenAIScraper,
+    "anthropic": AnthropicScraper,
+    "datadog": DatadogScraper,
+    "meta": MetaScraper,
+    "salesforce": SalesforceScraper,
+    "amazon": AmazonScraper,
 }
