@@ -1,4 +1,4 @@
-"""Google job scraper using careers sitemap."""
+"""Google job scraper using careers sitemap + page titles."""
 
 import logging
 import re
@@ -13,34 +13,53 @@ from .base import BaseScraper
 
 logger = logging.getLogger(__name__)
 
+# PM-related keywords to identify product management slugs
+PM_SLUG_KEYWORDS = [
+    "product-manager", "product-management", "product-lead",
+    "product-owner", "product-director", "head-of-product",
+    "group-product-manager",
+]
+
 
 class GoogleScraper(BaseScraper):
-    """Scraper for Google jobs via careers sitemap."""
+    """Scraper for Google jobs via careers sitemap + page title enrichment."""
 
     company_name = "Google"
     SITEMAP_URL = "https://careers.google.com/jobs/sitemap"
+    SESSION = requests.Session()
+    SESSION.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    })
 
     def fetch_jobs(self) -> List[Job]:
-        """Fetch jobs from Google Careers sitemap."""
+        """Fetch jobs from Google Careers sitemap, enriching PM roles with full titles."""
         jobs = []
         try:
-            response = requests.get(
-                self.SITEMAP_URL,
-                timeout=30,
-                headers={"User-Agent": "JobFinder/1.0"},
-            )
+            response = self.SESSION.get(self.SITEMAP_URL, timeout=30)
             response.raise_for_status()
 
-            # Parse XML sitemap
             root = ET.fromstring(response.content)
             ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
-            for url_elem in root.findall("sm:url", ns):
+            entries = root.findall("sm:url", ns)
+            logger.info(f"Found {len(entries)} entries in Google sitemap")
+
+            for url_elem in entries:
                 job = self._parse_sitemap_entry(url_elem, ns)
                 if job:
                     jobs.append(job)
 
-            logger.info(f"Fetched {len(jobs)} jobs from Google")
+            # Enrich PM jobs with full titles from their pages
+            pm_jobs = [j for j in jobs if self._is_pm_slug(j)]
+            logger.info(f"Enriching {len(pm_jobs)} PM jobs with full titles...")
+
+            for job in pm_jobs:
+                full_title = self._fetch_full_title(job.url)
+                if full_title:
+                    job.title = full_title
+
+            logger.info(f"Fetched {len(jobs)} jobs from Google ({len(pm_jobs)} PM enriched)")
 
         except requests.RequestException as e:
             logger.error(f"Error fetching Google jobs: {e}")
@@ -48,6 +67,30 @@ class GoogleScraper(BaseScraper):
             logger.error(f"Error parsing Google sitemap XML: {e}")
 
         return jobs
+
+    @staticmethod
+    def _is_pm_slug(job: Job) -> bool:
+        """Check if a job's URL slug indicates a PM role."""
+        url_lower = job.url.lower()
+        return any(kw in url_lower for kw in PM_SLUG_KEYWORDS)
+
+    def _fetch_full_title(self, url: str) -> str | None:
+        """Fetch the full job title from the page's <title> tag."""
+        try:
+            resp = self.SESSION.get(url, timeout=10)
+            if resp.status_code != 200:
+                return None
+
+            match = re.search(r"<title>(.*?)</title>", resp.text)
+            if match:
+                title = match.group(1)
+                # Remove " — Google Careers" suffix
+                title = re.sub(r"\s*[—–-]\s*Google Careers\s*$", "", title)
+                return title.strip() if title.strip() else None
+
+        except requests.RequestException:
+            pass
+        return None
 
     def _parse_sitemap_entry(self, url_elem, ns: dict) -> Job | None:
         """Parse a job from a sitemap <url> entry."""
@@ -58,19 +101,14 @@ class GoogleScraper(BaseScraper):
             if not loc:
                 return None
 
-            # Extract job ID and title slug from URL
-            # Format: https://careers.google.com/jobs/results/12345-job-title-slug/
             match = re.search(r"/results/(\d+)-(.+?)/?$", loc)
             if not match:
                 return None
 
             job_id = match.group(1)
             title_slug = match.group(2)
+            title = title_slug.replace("-", " ").title()
 
-            # Convert slug to readable title
-            title = self._slug_to_title(title_slug)
-
-            # Parse lastmod date
             posted_date = None
             if lastmod:
                 try:
@@ -92,48 +130,3 @@ class GoogleScraper(BaseScraper):
         except (KeyError, TypeError) as e:
             logger.warning(f"Error parsing Google sitemap entry: {e}")
             return None
-
-    @staticmethod
-    def _slug_to_title(slug: str) -> str:
-        """Convert URL slug to a properly cased title."""
-        # Known acronyms/abbreviations that should stay uppercase
-        uppercase_words = {
-            "ai", "ml", "api", "apis", "ar", "vr", "xr", "ui", "ux",
-            "sre", "swe", "tpm", "pm", "hr", "it", "ab", "qa",
-            "gcp", "gtm", "sql", "css", "html", "ios", "tv", "hq",
-            "crm", "erp", "saas", "b2b", "b2c", "emea", "apac",
-            "npi", "ops", "devops", "devsecops",
-        }
-        # Known words that should keep specific casing
-        special_words = {
-            "youtube": "YouTube",
-            "google": "Google",
-            "android": "Android",
-            "chrome": "Chrome",
-            "pixel": "Pixel",
-            "waymo": "Waymo",
-            "deepmind": "DeepMind",
-            "tensorflow": "TensorFlow",
-            "firebase": "Firebase",
-            "fitbit": "Fitbit",
-            "waze": "Waze",
-        }
-
-        words = slug.split("-")
-        result = []
-        for word in words:
-            word_lower = word.lower()
-            if word_lower in uppercase_words:
-                result.append(word.upper())
-            elif word_lower in special_words:
-                result.append(special_words[word_lower])
-            else:
-                result.append(word.capitalize())
-
-        # Fix roman numerals (I, II, III, IV)
-        title = " ".join(result)
-        title = re.sub(r'\bIii\b', 'III', title)
-        title = re.sub(r'\bIi\b', 'II', title)
-        title = re.sub(r'\bIv\b', 'IV', title)
-
-        return title
