@@ -175,6 +175,7 @@ def show_job_listings():
     st.divider()
 
     # Filters
+    col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
 
     with col1:
         companies = ["All"] + list(company_display_names.keys())
