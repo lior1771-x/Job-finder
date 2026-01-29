@@ -1,6 +1,8 @@
-"""Google job scraper using careers API."""
+"""Google job scraper using careers sitemap."""
 
 import logging
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import List
 
@@ -13,97 +15,80 @@ logger = logging.getLogger(__name__)
 
 
 class GoogleScraper(BaseScraper):
-    """Scraper for Google jobs via careers API."""
+    """Scraper for Google jobs via careers sitemap."""
 
     company_name = "Google"
-    # Google Careers API endpoint
-    API_URL = "https://careers.google.com/api/v3/search/"
+    SITEMAP_URL = "https://careers.google.com/jobs/sitemap"
 
     def fetch_jobs(self) -> List[Job]:
-        """Fetch jobs from Google Careers."""
+        """Fetch jobs from Google Careers sitemap."""
         jobs = []
-        page_token = None
-
         try:
-            while True:
-                params = {
-                    "page_size": 100,
-                    "q": "",  # Empty query to get all jobs
-                }
-                if page_token:
-                    params["page_token"] = page_token
+            response = requests.get(
+                self.SITEMAP_URL,
+                timeout=30,
+                headers={"User-Agent": "JobFinder/1.0"},
+            )
+            response.raise_for_status()
 
-                response = requests.get(
-                    self.API_URL,
-                    params=params,
-                    timeout=30,
-                    headers={
-                        "User-Agent": "JobFinder/1.0",
-                        "Accept": "application/json",
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
+            # Parse XML sitemap
+            root = ET.fromstring(response.content)
+            ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
-                for job_data in data.get("jobs", []):
-                    job = self._parse_job(job_data)
-                    if job:
-                        jobs.append(job)
-
-                # Check for next page
-                page_token = data.get("next_page_token")
-                if not page_token:
-                    break
-
-                # Safety limit
-                if len(jobs) > 5000:
-                    logger.warning("Hit safety limit for Google jobs")
-                    break
+            for url_elem in root.findall("sm:url", ns):
+                job = self._parse_sitemap_entry(url_elem, ns)
+                if job:
+                    jobs.append(job)
 
             logger.info(f"Fetched {len(jobs)} jobs from Google")
 
         except requests.RequestException as e:
             logger.error(f"Error fetching Google jobs: {e}")
+        except ET.ParseError as e:
+            logger.error(f"Error parsing Google sitemap XML: {e}")
 
         return jobs
 
-    def _parse_job(self, data: dict) -> Job | None:
-        """Parse a job from Google Careers API response."""
+    def _parse_sitemap_entry(self, url_elem, ns: dict) -> Job | None:
+        """Parse a job from a sitemap <url> entry."""
         try:
-            # Extract job ID from the name field (format: jobs/ID)
-            job_id = data.get("id", {}).get("job_id", "")
-            if not job_id:
-                name = data.get("name", "")
-                job_id = name.split("/")[-1] if "/" in name else name
+            loc = url_elem.findtext("sm:loc", default="", namespaces=ns)
+            lastmod = url_elem.findtext("sm:lastmod", default="", namespaces=ns)
 
-            # Get locations
-            locations = data.get("locations", [])
-            location_names = []
-            for loc in locations:
-                if isinstance(loc, dict):
-                    location_names.append(loc.get("display", loc.get("city", "Unknown")))
-                elif isinstance(loc, str):
-                    location_names.append(loc)
-            location = ", ".join(location_names) if location_names else "Unknown"
+            if not loc:
+                return None
 
-            # Get department/category
-            categories = data.get("categories", [])
-            department = ", ".join(categories) if categories else ""
+            # Extract job ID and title slug from URL
+            # Format: https://careers.google.com/jobs/results/12345-job-title-slug/
+            match = re.search(r"/results/(\d+)-(.+?)/?$", loc)
+            if not match:
+                return None
 
-            # Build URL
-            url = f"https://careers.google.com/jobs/results/{job_id}"
-            if data.get("apply_url"):
-                url = data["apply_url"]
+            job_id = match.group(1)
+            title_slug = match.group(2)
+
+            # Convert slug to readable title
+            title = title_slug.replace("-", " ").title()
+
+            # Parse lastmod date
+            posted_date = None
+            if lastmod:
+                try:
+                    posted_date = datetime.fromisoformat(
+                        lastmod.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    pass
 
             return Job(
                 id=job_id,
                 company=self.company_name,
-                title=data.get("title", "Unknown"),
-                location=location,
-                url=url,
-                department=department,
-                posted_date=None,  # Google API doesn't expose posting date
+                title=title,
+                location="Unknown",
+                url=loc,
+                department="",
+                posted_date=posted_date,
             )
         except (KeyError, TypeError) as e:
-            logger.warning(f"Error parsing Google job: {e}")
+            logger.warning(f"Error parsing Google sitemap entry: {e}")
             return None
