@@ -162,12 +162,15 @@ def show_job_listings():
                     status_text.text(f"Scraping {name}...")
 
                     try:
-                        if clear_rescrape:
-                            deleted = storage.delete_jobs_by_company(name)
-                            if deleted:
-                                status_text.text(f"Cleared {deleted} old {name} jobs, re-scraping...")
-
                         scraper = SCRAPERS[key]()
+
+                        if clear_rescrape:
+                            # Delete by both display name and scraper company_name
+                            deleted = storage.delete_jobs_by_company(name)
+                            deleted += storage.delete_jobs_by_company(scraper.company_name)
+                            deleted += storage.delete_jobs_by_company(key)
+                            st.info(f"Cleared {deleted} old {name} jobs")
+
                         jobs = scraper.fetch_jobs()
 
                         jobs = [j for j in jobs if is_product_management_role(j.title)]
