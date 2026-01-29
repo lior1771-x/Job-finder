@@ -46,6 +46,8 @@ def main():
 def show_dashboard():
     st.header("Dashboard")
 
+    config = Config.load()
+
     # Get all jobs and filter for PM roles
     all_jobs = storage.get_all_jobs()
     pm_jobs = [j for j in all_jobs if is_product_management_role(j.title)]
@@ -73,9 +75,20 @@ def show_dashboard():
     # PM jobs by company chart
     st.subheader("PM Jobs by Company")
 
-    if pm_jobs:
-        from collections import Counter
-        company_counts = Counter(j.company.title() for j in pm_jobs)
+    from collections import Counter
+    company_counts = Counter(j.company.title() for j in pm_jobs)
+
+    # Include all configured companies, even those with 0 jobs
+    all_company_names = [
+        SCRAPERS[key].company_name
+        for key in config.companies
+        if key in SCRAPERS
+    ]
+    for name in all_company_names:
+        if name not in company_counts:
+            company_counts[name] = 0
+
+    if any(v > 0 for v in company_counts.values()):
         df = pd.DataFrame(
             list(company_counts.items()),
             columns=["Company", "Jobs"]
@@ -460,7 +473,12 @@ def show_settings():
 
     # Display current config (read-only for now)
     st.write("**Tracked Companies:**")
-    st.write(", ".join(config.companies))
+    # Show display names instead of scraper keys
+    company_names = [
+        SCRAPERS[key].company_name if key in SCRAPERS else key
+        for key in config.companies
+    ]
+    st.write(", ".join(company_names))
 
     st.write("**Keyword Filters:**")
     st.write(", ".join(config.filters.keywords) if config.filters.keywords else "None")

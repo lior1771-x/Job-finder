@@ -40,7 +40,10 @@ class Config:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     db_path: str = "jobs.db"
     companies: List[str] = field(
-        default_factory=lambda: ["google", "stripe", "paypal", "uber", "ramp"]
+        default_factory=lambda: [
+            "google", "stripe", "paypal", "uber", "ramp",
+            "openai", "anthropic", "datadog", "meta", "salesforce", "amazon",
+        ]
     )
 
     @classmethod
@@ -86,7 +89,10 @@ class Config:
 
         # Parse other settings
         db_path = data.get("db_path", "jobs.db")
-        companies = data.get("companies", ["google", "stripe", "paypal", "uber", "ramp"])
+        companies = data.get("companies", [
+            "google", "stripe", "paypal", "uber", "ramp",
+            "openai", "anthropic", "datadog", "meta", "salesforce", "amazon",
+        ])
 
         return cls(
             webhooks=webhooks,
