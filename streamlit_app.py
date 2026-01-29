@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from job_finder.storage import JobStorage
 from job_finder.scrapers import SCRAPERS
 from job_finder.config import Config
+from job_finder.location_utils import normalize_location, extract_search_terms
 
 # Page config
 st.set_page_config(
@@ -147,9 +148,10 @@ def show_job_listings():
     cutoff_date = datetime.now() - timedelta(days=days_filter)
     jobs = [j for j in jobs if j.first_seen > cutoff_date]
 
-    # Apply location filter
+    # Apply location filter using normalized locations
     if location_filter:
-        jobs = [j for j in jobs if location_filter.lower() in j.location.lower()]
+        filter_lower = location_filter.lower()
+        jobs = [j for j in jobs if filter_lower in normalize_location(j.location).lower()]
 
     # Get tracked jobs for marking
     tracked_jobs = storage.get_tracked_job_ids()
@@ -177,7 +179,8 @@ def show_job_listings():
                 else:
                     date_str = job.first_seen.strftime('%Y-%m-%d')
                     date_label = "Found"
-                st.caption(f"{job.company.title()} · {job.location} · {date_label}: {date_str}")
+                normalized_loc = normalize_location(job.location)
+                st.caption(f"{job.company.title()} · {normalized_loc} · {date_label}: {date_str}")
                 if job.department:
                     st.caption(f"Dept: {job.department}")
 
