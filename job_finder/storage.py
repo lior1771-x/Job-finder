@@ -43,6 +43,28 @@ class JobStorage:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_first_seen ON jobs(first_seen)
             """)
+            # Tracker table for companies/roles user is interested in
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tracker (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company TEXT NOT NULL,
+                    role TEXT,
+                    status TEXT DEFAULT 'Interested',
+                    referral TEXT,
+                    notes TEXT,
+                    job_id TEXT,
+                    job_company TEXT,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    FOREIGN KEY (job_id, job_company) REFERENCES jobs(id, company)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tracker_company ON tracker(company)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tracker_status ON tracker(status)
+            """)
             conn.commit()
 
     def get_known_job_ids(self, company: str) -> Set[str]:
@@ -202,3 +224,150 @@ class JobStorage:
             total = cursor.fetchone()[0]
 
             return {"total": total, "by_company": by_company}
+
+    # Tracker methods
+    def add_tracker_entry(
+        self,
+        company: str,
+        role: Optional[str] = None,
+        status: str = "Interested",
+        referral: Optional[str] = None,
+        notes: Optional[str] = None,
+        job_id: Optional[str] = None,
+        job_company: Optional[str] = None,
+    ) -> int:
+        """
+        Add a new entry to the tracker.
+
+        Returns:
+            The ID of the newly created entry.
+        """
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO tracker (company, role, status, referral, notes, job_id, job_company, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (company, role, status, referral, notes, job_id, job_company, now, now),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_tracker_entry(
+        self,
+        entry_id: int,
+        company: Optional[str] = None,
+        role: Optional[str] = None,
+        status: Optional[str] = None,
+        referral: Optional[str] = None,
+        notes: Optional[str] = None,
+        job_id: Optional[str] = None,
+        job_company: Optional[str] = None,
+    ) -> bool:
+        """
+        Update an existing tracker entry.
+
+        Returns:
+            True if the entry was updated, False if not found.
+        """
+        updates = []
+        values = []
+
+        if company is not None:
+            updates.append("company = ?")
+            values.append(company)
+        if role is not None:
+            updates.append("role = ?")
+            values.append(role)
+        if status is not None:
+            updates.append("status = ?")
+            values.append(status)
+        if referral is not None:
+            updates.append("referral = ?")
+            values.append(referral)
+        if notes is not None:
+            updates.append("notes = ?")
+            values.append(notes)
+        if job_id is not None:
+            updates.append("job_id = ?")
+            values.append(job_id)
+        if job_company is not None:
+            updates.append("job_company = ?")
+            values.append(job_company)
+
+        if not updates:
+            return False
+
+        updates.append("updated_at = ?")
+        values.append(datetime.now().isoformat())
+        values.append(entry_id)
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                f"UPDATE tracker SET {', '.join(updates)} WHERE id = ?",
+                values,
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_tracker_entry(self, entry_id: int) -> bool:
+        """
+        Delete a tracker entry.
+
+        Returns:
+            True if the entry was deleted, False if not found.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("DELETE FROM tracker WHERE id = ?", (entry_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_all_tracker_entries(self) -> List[dict]:
+        """
+        Get all tracker entries with linked job info if available.
+
+        Returns:
+            List of tracker entries as dictionaries.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                SELECT t.id, t.company, t.role, t.status, t.referral, t.notes,
+                       t.job_id, t.job_company, t.created_at, t.updated_at,
+                       j.title as job_title, j.url as job_url, j.location as job_location
+                FROM tracker t
+                LEFT JOIN jobs j ON t.job_id = j.id AND t.job_company = j.company
+                ORDER BY t.updated_at DESC
+                """
+            )
+            columns = [
+                "id", "company", "role", "status", "referral", "notes",
+                "job_id", "job_company", "created_at", "updated_at",
+                "job_title", "job_url", "job_location"
+            ]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def get_tracker_entry(self, entry_id: int) -> Optional[dict]:
+        """Get a single tracker entry by ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                SELECT t.id, t.company, t.role, t.status, t.referral, t.notes,
+                       t.job_id, t.job_company, t.created_at, t.updated_at,
+                       j.title as job_title, j.url as job_url, j.location as job_location
+                FROM tracker t
+                LEFT JOIN jobs j ON t.job_id = j.id AND t.job_company = j.company
+                WHERE t.id = ?
+                """,
+                (entry_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                columns = [
+                    "id", "company", "role", "status", "referral", "notes",
+                    "job_id", "job_company", "created_at", "updated_at",
+                    "job_title", "job_url", "job_location"
+                ]
+                return dict(zip(columns, row))
+            return None

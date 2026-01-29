@@ -30,13 +30,15 @@ def main():
     # Sidebar navigation
     page = st.sidebar.radio(
         "Navigation",
-        ["Dashboard", "Job Listings", "Run Scraper", "Settings"]
+        ["Dashboard", "Job Listings", "My Tracker", "Run Scraper", "Settings"]
     )
 
     if page == "Dashboard":
         show_dashboard()
     elif page == "Job Listings":
         show_job_listings()
+    elif page == "My Tracker":
+        show_tracker()
     elif page == "Run Scraper":
         show_scraper()
     elif page == "Settings":
@@ -174,6 +176,191 @@ def show_job_listings():
         )
     else:
         st.info("No jobs found matching your filters.")
+
+
+def show_tracker():
+    st.header("My Tracker")
+
+    # Status options
+    STATUS_OPTIONS = ["Interested", "Applied", "Phone Screen", "Interview", "Offer", "Rejected", "Withdrawn"]
+
+    # Add new entry form
+    with st.expander("Add New Entry", expanded=False):
+        with st.form("add_tracker_entry"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                new_company = st.text_input("Company *", placeholder="e.g. Google")
+                new_role = st.text_input("Role", placeholder="e.g. Senior Product Manager")
+
+            with col2:
+                new_status = st.selectbox("Status", STATUS_OPTIONS)
+                new_referral = st.text_input("Referral", placeholder="e.g. John Doe (LinkedIn)")
+
+            new_notes = st.text_area("Notes", placeholder="Any additional notes...")
+
+            # Link to existing job posting
+            st.write("**Link to Job Posting (Optional)**")
+            all_jobs = storage.get_all_jobs()
+            pm_jobs = [j for j in all_jobs if is_product_management_role(j.title)]
+
+            job_options = ["None"] + [
+                f"{j.company.title()} - {j.title} ({j.id})"
+                for j in pm_jobs
+            ]
+            selected_job = st.selectbox("Link to Job", job_options)
+
+            submitted = st.form_submit_button("Add Entry", type="primary")
+
+            if submitted:
+                if not new_company:
+                    st.error("Company is required.")
+                else:
+                    job_id = None
+                    job_company = None
+                    if selected_job != "None":
+                        # Extract job_id from the selection
+                        for j in pm_jobs:
+                            if f"{j.company.title()} - {j.title} ({j.id})" == selected_job:
+                                job_id = j.id
+                                job_company = j.company
+                                break
+
+                    storage.add_tracker_entry(
+                        company=new_company,
+                        role=new_role if new_role else None,
+                        status=new_status,
+                        referral=new_referral if new_referral else None,
+                        notes=new_notes if new_notes else None,
+                        job_id=job_id,
+                        job_company=job_company,
+                    )
+                    st.success(f"Added {new_company} to tracker!")
+                    st.rerun()
+
+    st.divider()
+
+    # Display tracker entries
+    entries = storage.get_all_tracker_entries()
+
+    if not entries:
+        st.info("No entries in tracker yet. Add your first company above!")
+        return
+
+    # Status summary
+    status_counts = {}
+    for entry in entries:
+        status = entry["status"]
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    cols = st.columns(len(status_counts) if status_counts else 1)
+    for i, (status, count) in enumerate(status_counts.items()):
+        with cols[i % len(cols)]:
+            st.metric(status, count)
+
+    st.divider()
+
+    # Filter by status
+    filter_status = st.multiselect(
+        "Filter by Status",
+        STATUS_OPTIONS,
+        default=[],
+        placeholder="All statuses"
+    )
+
+    if filter_status:
+        entries = [e for e in entries if e["status"] in filter_status]
+
+    st.write(f"Showing {len(entries)} entries")
+
+    # Display entries as editable cards
+    for entry in entries:
+        with st.container():
+            col1, col2, col3 = st.columns([3, 2, 1])
+
+            with col1:
+                st.subheader(entry["company"])
+                if entry["role"]:
+                    st.write(f"**Role:** {entry['role']}")
+                if entry["job_url"]:
+                    st.markdown(f"**Linked Job:** [{entry['job_title']}]({entry['job_url']})")
+
+            with col2:
+                # Editable status
+                current_status_idx = STATUS_OPTIONS.index(entry["status"]) if entry["status"] in STATUS_OPTIONS else 0
+                new_status = st.selectbox(
+                    "Status",
+                    STATUS_OPTIONS,
+                    index=current_status_idx,
+                    key=f"status_{entry['id']}"
+                )
+
+                if new_status != entry["status"]:
+                    storage.update_tracker_entry(entry["id"], status=new_status)
+                    st.rerun()
+
+            with col3:
+                if st.button("Delete", key=f"delete_{entry['id']}", type="secondary"):
+                    storage.delete_tracker_entry(entry["id"])
+                    st.rerun()
+
+            # Expandable details
+            with st.expander("Details & Edit"):
+                with st.form(f"edit_{entry['id']}"):
+                    edit_referral = st.text_input(
+                        "Referral",
+                        value=entry["referral"] or "",
+                        key=f"referral_{entry['id']}"
+                    )
+                    edit_notes = st.text_area(
+                        "Notes",
+                        value=entry["notes"] or "",
+                        key=f"notes_{entry['id']}"
+                    )
+
+                    # Option to link/change linked job
+                    all_jobs = storage.get_all_jobs()
+                    pm_jobs = [j for j in all_jobs if is_product_management_role(j.title)]
+                    job_options = ["None"] + [
+                        f"{j.company.title()} - {j.title} ({j.id})"
+                        for j in pm_jobs
+                    ]
+
+                    current_job_idx = 0
+                    if entry["job_id"]:
+                        for idx, opt in enumerate(job_options):
+                            if f"({entry['job_id']})" in opt:
+                                current_job_idx = idx
+                                break
+
+                    edit_job = st.selectbox(
+                        "Linked Job",
+                        job_options,
+                        index=current_job_idx,
+                        key=f"job_{entry['id']}"
+                    )
+
+                    if st.form_submit_button("Save Changes"):
+                        job_id = None
+                        job_company = None
+                        if edit_job != "None":
+                            for j in pm_jobs:
+                                if f"{j.company.title()} - {j.title} ({j.id})" == edit_job:
+                                    job_id = j.id
+                                    job_company = j.company
+                                    break
+
+                        storage.update_tracker_entry(
+                            entry["id"],
+                            referral=edit_referral,
+                            notes=edit_notes,
+                            job_id=job_id if job_id else "",
+                            job_company=job_company if job_company else "",
+                        )
+                        st.success("Updated!")
+                        st.rerun()
+
+            st.divider()
 
 
 def show_scraper():
