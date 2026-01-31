@@ -8,6 +8,7 @@ from job_finder.storage import JobStorage
 from job_finder.scrapers import SCRAPERS
 from job_finder.config import Config
 from job_finder.location_utils import normalize_location, extract_search_terms
+from job_finder.matching import score_jobs
 
 # Page config
 st.set_page_config(
@@ -30,7 +31,7 @@ def main():
     # Sidebar navigation
     page = st.sidebar.radio(
         "Navigation",
-        ["Dashboard", "Job Listings", "My Tracker", "Settings"]
+        ["Dashboard", "Job Listings", "My Tracker", "Referrals", "Settings"]
     )
 
     if page == "Dashboard":
@@ -39,6 +40,8 @@ def main():
         show_job_listings()
     elif page == "My Tracker":
         show_tracker()
+    elif page == "Referrals":
+        show_referrals()
     elif page == "Settings":
         show_settings()
 
@@ -245,18 +248,33 @@ def show_job_listings():
     if hide_tracked:
         jobs = [j for j in jobs if (j.id, j.company) not in tracked_jobs]
 
+    # Compute match scores if resume is available
+    resume = storage.get_latest_resume()
+    match_scores = {}
+    if resume:
+        match_scores = score_jobs(resume["text_content"], jobs)
+
     st.write(f"Showing {len(jobs)} product management jobs from the last {days_filter} days")
 
     if jobs:
         # Display jobs with track button
         for job in jobs:
             is_tracked = (job.id, job.company) in tracked_jobs
+            match = match_scores.get((job.id, job.company))
 
             col1, col2 = st.columns([5, 1])
 
             with col1:
-                # Job info
-                st.markdown(f"**{job.title}**")
+                # Job title with match badge
+                title_text = f"**{job.title}**"
+                if match and match.level != "N/A":
+                    if match.level == "Strong":
+                        title_text += f" &nbsp; :green[**Strong Match** ({match.score}%)]"
+                    elif match.level == "Good":
+                        title_text += f" &nbsp; :orange[**Good Match** ({match.score}%)]"
+                    else:
+                        title_text += f" &nbsp; :gray[Low Match ({match.score}%)]"
+                st.markdown(title_text)
                 # Show posted_date if available, otherwise first_seen
                 if job.posted_date:
                     date_str = job.posted_date.strftime('%Y-%m-%d')
@@ -307,7 +325,6 @@ def show_tracker():
 
             with col2:
                 new_status = st.selectbox("Status", STATUS_OPTIONS)
-                new_referral = st.text_input("Referral", placeholder="e.g. John Doe (LinkedIn)")
 
             new_notes = st.text_area("Notes", placeholder="Any additional notes...")
 
@@ -342,7 +359,6 @@ def show_tracker():
                         company=new_company,
                         role=new_role if new_role else None,
                         status=new_status,
-                        referral=new_referral if new_referral else None,
                         notes=new_notes if new_notes else None,
                         job_id=job_id,
                         job_company=job_company,
@@ -419,11 +435,6 @@ def show_tracker():
             # Expandable details
             with st.expander("Details & Edit"):
                 with st.form(f"edit_{entry['id']}"):
-                    edit_referral = st.text_input(
-                        "Referral",
-                        value=entry["referral"] or "",
-                        key=f"referral_{entry['id']}"
-                    )
                     edit_notes = st.text_area(
                         "Notes",
                         value=entry["notes"] or "",
@@ -464,7 +475,154 @@ def show_tracker():
 
                         storage.update_tracker_entry(
                             entry["id"],
-                            referral=edit_referral,
+                            notes=edit_notes,
+                            job_id=job_id if job_id else "",
+                            job_company=job_company if job_company else "",
+                        )
+                        st.success("Updated!")
+                        st.rerun()
+
+            st.divider()
+
+
+def show_referrals():
+    st.header("Referrals")
+
+    # Add referral form
+    with st.expander("Add Referral", expanded=False):
+        with st.form("add_referral"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                ref_name = st.text_input("Name *", placeholder="e.g. Jane Smith")
+                ref_company = st.text_input("Company *", placeholder="e.g. Google")
+
+            with col2:
+                ref_contact = st.text_input("Contact", placeholder="e.g. email, LinkedIn URL, phone")
+
+            ref_notes = st.text_area("Notes", placeholder="How you know them, context, etc.")
+
+            # Link to existing job posting
+            st.write("**Link to Job Posting (Optional)**")
+            all_jobs = storage.get_all_jobs()
+            pm_jobs = [j for j in all_jobs if is_product_management_role(j.title)]
+            job_options = ["None"] + [
+                f"{j.company.title()} - {j.title} ({j.id})"
+                for j in pm_jobs
+            ]
+            selected_job = st.selectbox("Link to Job", job_options, key="ref_link_job")
+
+            submitted = st.form_submit_button("Add Referral", type="primary")
+
+            if submitted:
+                if not ref_name:
+                    st.error("Name is required.")
+                elif not ref_company:
+                    st.error("Company is required.")
+                else:
+                    job_id = None
+                    job_company = None
+                    if selected_job != "None":
+                        for j in pm_jobs:
+                            if f"{j.company.title()} - {j.title} ({j.id})" == selected_job:
+                                job_id = j.id
+                                job_company = j.company
+                                break
+
+                    storage.add_referral(
+                        name=ref_name,
+                        company=ref_company,
+                        contact=ref_contact if ref_contact else None,
+                        notes=ref_notes if ref_notes else None,
+                        job_id=job_id,
+                        job_company=job_company,
+                    )
+                    st.success(f"Added referral: {ref_name} at {ref_company}")
+                    st.rerun()
+
+    st.divider()
+
+    # Display referrals
+    referrals = storage.get_all_referrals()
+
+    if not referrals:
+        st.info("No referrals yet. Add your first referral above!")
+        return
+
+    # Summary: count by company
+    from collections import Counter
+    company_counts = Counter(r["company"] for r in referrals)
+    cols = st.columns(min(len(company_counts), 4))
+    for i, (company, count) in enumerate(company_counts.most_common()):
+        with cols[i % len(cols)]:
+            st.metric(company, count)
+
+    st.divider()
+    st.write(f"Showing {len(referrals)} referrals")
+
+    # Display referral cards
+    for ref in referrals:
+        with st.container():
+            col1, col2 = st.columns([4, 1])
+
+            with col1:
+                st.subheader(ref["name"])
+                st.write(f"**Company:** {ref['company']}")
+                if ref["contact"]:
+                    st.write(f"**Contact:** {ref['contact']}")
+                if ref["job_url"]:
+                    st.markdown(f"**Linked Job:** [{ref['job_title']}]({ref['job_url']})")
+
+            with col2:
+                if st.button("Delete", key=f"del_ref_{ref['id']}", type="secondary"):
+                    storage.delete_referral(ref["id"])
+                    st.rerun()
+
+            # Expandable edit form
+            with st.expander("Edit"):
+                with st.form(f"edit_ref_{ref['id']}"):
+                    edit_name = st.text_input("Name", value=ref["name"], key=f"rname_{ref['id']}")
+                    edit_company = st.text_input("Company", value=ref["company"], key=f"rcompany_{ref['id']}")
+                    edit_contact = st.text_input("Contact", value=ref["contact"] or "", key=f"rcontact_{ref['id']}")
+                    edit_notes = st.text_area("Notes", value=ref["notes"] or "", key=f"rnotes_{ref['id']}")
+
+                    # Job link
+                    all_jobs = storage.get_all_jobs()
+                    pm_jobs = [j for j in all_jobs if is_product_management_role(j.title)]
+                    job_options = ["None"] + [
+                        f"{j.company.title()} - {j.title} ({j.id})"
+                        for j in pm_jobs
+                    ]
+
+                    current_job_idx = 0
+                    if ref["job_id"]:
+                        for idx, opt in enumerate(job_options):
+                            if f"({ref['job_id']})" in opt:
+                                current_job_idx = idx
+                                break
+
+                    edit_job = st.selectbox(
+                        "Linked Job",
+                        job_options,
+                        index=current_job_idx,
+                        key=f"rjob_{ref['id']}"
+                    )
+
+                    if st.form_submit_button("Save Changes"):
+                        job_id = None
+                        job_company = None
+                        if edit_job != "None":
+                            for j in pm_jobs:
+                                if f"{j.company.title()} - {j.title} ({j.id})" == edit_job:
+                                    job_id = j.id
+                                    job_company = j.company
+                                    break
+
+                        storage.update_referral(
+                            ref["id"],
+                            name=edit_name,
+                            company=edit_company,
+                            contact=edit_contact,
                             notes=edit_notes,
                             job_id=job_id if job_id else "",
                             job_company=job_company if job_company else "",
@@ -479,6 +637,38 @@ def show_settings():
     st.header("Settings")
 
     config = Config.load()
+
+    # Resume upload section
+    st.subheader("Resume")
+
+    resume = storage.get_latest_resume()
+    if resume:
+        st.success(f"Resume uploaded: **{resume['filename']}** (uploaded {resume['uploaded_at'][:10]})")
+    else:
+        st.info("No resume uploaded yet. Upload a PDF to enable job matching.")
+
+    uploaded_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
+    if uploaded_file is not None:
+        try:
+            from PyPDF2 import PdfReader
+            import io
+
+            reader = PdfReader(io.BytesIO(uploaded_file.read()))
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() or ""
+
+            text = text.strip()
+            if text:
+                storage.add_resume(uploaded_file.name, text)
+                st.success(f"Resume '{uploaded_file.name}' uploaded and processed ({len(text)} characters extracted).")
+                st.rerun()
+            else:
+                st.error("Could not extract text from the PDF. Please try a different file.")
+        except Exception as e:
+            st.error(f"Error processing PDF: {e}")
+
+    st.divider()
 
     st.subheader("Current Configuration")
 

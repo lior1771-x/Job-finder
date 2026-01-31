@@ -37,6 +37,12 @@ class JobStorage:
                     PRIMARY KEY (id, company)
                 )
             """)
+            # Migrate: add description column if missing
+            cursor = conn.execute("PRAGMA table_info(jobs)")
+            columns = {row[1] for row in cursor.fetchall()}
+            if "description" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN description TEXT")
+
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_company ON jobs(company)
             """)
@@ -64,6 +70,33 @@ class JobStorage:
             """)
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_tracker_status ON tracker(status)
+            """)
+            # Referrals table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS referrals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    company TEXT NOT NULL,
+                    contact TEXT,
+                    notes TEXT,
+                    job_id TEXT,
+                    job_company TEXT,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    FOREIGN KEY (job_id, job_company) REFERENCES jobs(id, company)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_referrals_company ON referrals(company)
+            """)
+            # Resume table for storing uploaded resumes
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS resume (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    filename TEXT NOT NULL,
+                    text_content TEXT NOT NULL,
+                    uploaded_at TEXT NOT NULL
+                )
             """)
             conn.commit()
 
@@ -99,8 +132,8 @@ class JobStorage:
                 try:
                     conn.execute(
                         """
-                        INSERT INTO jobs (id, company, title, location, url, department, posted_date, first_seen)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO jobs (id, company, title, location, url, department, posted_date, first_seen, description)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             job.id,
@@ -111,6 +144,7 @@ class JobStorage:
                             job.department,
                             job.posted_date.isoformat() if job.posted_date else None,
                             job.first_seen.isoformat(),
+                            job.description,
                         ),
                     )
                     new_jobs.append(job)
@@ -174,6 +208,7 @@ class JobStorage:
                     department=row[5],
                     posted_date=datetime.fromisoformat(row[6]) if row[6] else None,
                     first_seen=datetime.fromisoformat(row[7]),
+                    description=row[8] if len(row) > 8 else None,
                 )
             return None
 
@@ -208,6 +243,7 @@ class JobStorage:
                     department=row[5],
                     posted_date=datetime.fromisoformat(row[6]) if row[6] else None,
                     first_seen=datetime.fromisoformat(row[7]),
+                    description=row[8] if len(row) > 8 else None,
                 )
                 for row in cursor.fetchall()
             ]
@@ -395,3 +431,106 @@ class JobStorage:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("SELECT job_id, job_company FROM tracker WHERE job_id IS NOT NULL")
             return {(row[0], row[1]) for row in cursor.fetchall()}
+
+    # Referral methods
+    def add_referral(
+        self,
+        name: str,
+        company: str,
+        contact: Optional[str] = None,
+        notes: Optional[str] = None,
+        job_id: Optional[str] = None,
+        job_company: Optional[str] = None,
+    ) -> int:
+        """Add a new referral. Returns the new referral ID."""
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO referrals (name, company, contact, notes, job_id, job_company, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (name, company, contact, notes, job_id, job_company, now, now),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_all_referrals(self) -> List[dict]:
+        """Get all referrals with linked job info if available."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                SELECT r.id, r.name, r.company, r.contact, r.notes,
+                       r.job_id, r.job_company, r.created_at, r.updated_at,
+                       j.title as job_title, j.url as job_url
+                FROM referrals r
+                LEFT JOIN jobs j ON r.job_id = j.id AND r.job_company = j.company
+                ORDER BY r.updated_at DESC
+                """
+            )
+            columns = [
+                "id", "name", "company", "contact", "notes",
+                "job_id", "job_company", "created_at", "updated_at",
+                "job_title", "job_url"
+            ]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def update_referral(self, entry_id: int, **kwargs) -> bool:
+        """Update an existing referral. Returns True if updated."""
+        allowed = {"name", "company", "contact", "notes", "job_id", "job_company"}
+        updates = []
+        values = []
+        for key, value in kwargs.items():
+            if key in allowed:
+                updates.append(f"{key} = ?")
+                values.append(value)
+
+        if not updates:
+            return False
+
+        updates.append("updated_at = ?")
+        values.append(datetime.now().isoformat())
+        values.append(entry_id)
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                f"UPDATE referrals SET {', '.join(updates)} WHERE id = ?",
+                values,
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_referral(self, entry_id: int) -> bool:
+        """Delete a referral. Returns True if deleted."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("DELETE FROM referrals WHERE id = ?", (entry_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # Resume methods
+    def add_resume(self, filename: str, text_content: str) -> int:
+        """Store an uploaded resume. Returns the new resume ID."""
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "INSERT INTO resume (filename, text_content, uploaded_at) VALUES (?, ?, ?)",
+                (filename, text_content, now),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_latest_resume(self) -> Optional[dict]:
+        """Get the most recently uploaded resume."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT id, filename, text_content, uploaded_at FROM resume ORDER BY id DESC LIMIT 1"
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "id": row[0],
+                    "filename": row[1],
+                    "text_content": row[2],
+                    "uploaded_at": row[3],
+                }
+            return None

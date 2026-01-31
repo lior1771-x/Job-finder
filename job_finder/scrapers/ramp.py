@@ -1,6 +1,7 @@
 """Ramp job scraper using Ashby API."""
 
 import logging
+import re
 from datetime import datetime
 from typing import List
 
@@ -66,6 +67,14 @@ class RampScraper(BaseScraper):
                 except ValueError:
                     pass
 
+            # Extract description (Ashby provides descriptionPlain or descriptionHtml)
+            description = data.get("descriptionPlain")
+            if not description:
+                html = data.get("descriptionHtml") or data.get("description", "")
+                if html:
+                    description = re.sub(r"<[^>]+>", " ", html)
+                    description = re.sub(r"\s+", " ", description).strip()
+
             return Job(
                 id=data["id"],
                 company=self.company_name,
@@ -74,6 +83,7 @@ class RampScraper(BaseScraper):
                 url=data.get("jobUrl", ""),
                 department=department,
                 posted_date=posted_date,
+                description=description if description else None,
             )
         except (KeyError, TypeError) as e:
             logger.warning(f"Error parsing Ramp job: {e}")

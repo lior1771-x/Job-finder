@@ -1,6 +1,7 @@
 """Datadog job scraper using Greenhouse API."""
 
 import logging
+import re
 from datetime import datetime
 from typing import List
 
@@ -67,6 +68,13 @@ class DatadogScraper(BaseScraper):
                 except ValueError:
                     pass
 
+            # Extract plain-text description from HTML content
+            description = None
+            content = data.get("content")
+            if content:
+                description = re.sub(r"<[^>]+>", " ", content)
+                description = re.sub(r"\s+", " ", description).strip()
+
             return Job(
                 id=str(data["id"]),
                 company=self.company_name,
@@ -75,6 +83,7 @@ class DatadogScraper(BaseScraper):
                 url=data.get("absolute_url", ""),
                 department=department,
                 posted_date=posted_date,
+                description=description,
             )
         except (KeyError, TypeError) as e:
             logger.warning(f"Error parsing Datadog job: {e}")

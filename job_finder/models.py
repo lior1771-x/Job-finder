@@ -17,6 +17,7 @@ class Job:
     department: str = ""
     posted_date: Optional[datetime] = None
     first_seen: datetime = field(default_factory=datetime.now)
+    description: Optional[str] = None
 
     def matches_keywords(self, keywords: list[str]) -> bool:
         """Check if job title matches any of the given keywords (case-insensitive)."""
